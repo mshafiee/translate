@@ -12,6 +12,26 @@ import (
 	"strings"
 )
 
+func CountLines(filename string) (int, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	var lines int
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	return lines, nil
+}
+
 func GetCSVFieldCount(csvString string) (int, error) {
 	reader := csv.NewReader(strings.NewReader(csvString))
 	records, err := reader.ReadAll()

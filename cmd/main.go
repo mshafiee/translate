@@ -49,6 +49,11 @@ func main() {
 
 	inputFileNameWithoutExt := filepath.Base(inputFilePath[:len(inputFilePath)-len(filepath.Ext(inputFilePath))])
 
+	totalLineNumber, err := utils.CountLines(inputFilePath)
+	if err != nil {
+		exitWithError(err)
+	}
+
 	// Open the input file.
 	file, err := os.Open(inputFilePath)
 	if err != nil {
@@ -96,7 +101,7 @@ func main() {
 		// Increment the WaitGroup lineNumber.
 		wg.Add(1)
 
-		go consumer(concurrency, &wg, lineNumber, scanner.Text(), translateFrom, translateTo, writer)
+		go consumer(concurrency, &wg, totalLineNumber, lineNumber, scanner.Text(), translateFrom, translateTo, writer)
 
 	}
 
@@ -106,17 +111,19 @@ func main() {
 	// Flush any remaining data to the CSV file.
 	writer.Flush()
 
+	utils.ColorArrowProgressBar(100, 100)
 	intermediateFile.Close()
+	normalizedCommasFileName := fmt.Sprintf("%s/%s-normalized.csv", outputFolder, inputFileNameWithoutExt)
 	sortedFileName := fmt.Sprintf("%s/%s-sorted.csv", outputFolder, inputFileNameWithoutExt)
 	translatedTextFileName := fmt.Sprintf("%s/%s-%s.txt", outputFolder, inputFileNameWithoutExt, translateTo)
 	poFileName := fmt.Sprintf("%s/%s.po", outputFolder, inputFileNameWithoutExt)
-	postProccess(intermediateFileName, sortedFileName, translatedTextFileName, poFileName, 3)
+	postProccess(intermediateFileName, normalizedCommasFileName, sortedFileName, translatedTextFileName, poFileName, 3)
 }
 
 var mutex = &sync.Mutex{}
 
 // Consumer function that consumes elements of the buffer and writes them to a CSV file.
-func consumer(concurrency chan struct{}, wg *sync.WaitGroup, rowID int, originalText, translateFrom, translateTo string, writer *csv.Writer) {
+func consumer(concurrency chan struct{}, wg *sync.WaitGroup, totalRows, rowID int, originalText, translateFrom, translateTo string, writer *csv.Writer) {
 	// Release the slot in the concurrency channel when done.
 	defer func() { <-concurrency }()
 	defer wg.Done()
@@ -135,7 +142,8 @@ func consumer(concurrency chan struct{}, wg *sync.WaitGroup, rowID int, original
 		if err != nil {
 			panic(err)
 		}
-		log.Println(rowID)
+		//log.Println("processing line:", rowID, totalRows)
+		utils.ColorArrowProgressBar(rowID, totalRows)
 
 		row := []string{
 			strconv.Itoa(rowID),
@@ -186,8 +194,7 @@ func consumer(concurrency chan struct{}, wg *sync.WaitGroup, rowID int, original
 	}
 }
 
-func postProccess(inputFileName, sortedFileName, translatedTextFileName, poFileName string, columnNumber int) {
-	normalizedCommasFileName := "normalizedCommasFileName.csv"
+func postProccess(inputFileName, normalizedCommasFileName, sortedFileName, translatedTextFileName, poFileName string, columnNumber int) {
 	err := utils.AddCommasToFile(inputFileName, normalizedCommasFileName)
 	if err != nil {
 		exitWithError(fmt.Errorf("Error AddCommasToCSV: %v\n", err))
