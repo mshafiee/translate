@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/mshafiee/progressbar"
 	"github.com/mshafiee/translate/internal/gtranslate"
 	"github.com/mshafiee/translate/internal/po"
 	"github.com/mshafiee/translate/internal/utils"
@@ -111,7 +112,7 @@ func main() {
 	// Flush any remaining data to the CSV file.
 	writer.Flush()
 
-	utils.ColorArrowProgressBar(100, 100)
+	progressBar.ColorArrowProgressBar(100, 100)
 	intermediateFile.Close()
 	normalizedCommasFileName := fmt.Sprintf("%s/%s-normalized.csv", outputFolder, inputFileNameWithoutExt)
 	sortedFileName := fmt.Sprintf("%s/%s-sorted.csv", outputFolder, inputFileNameWithoutExt)
@@ -143,7 +144,7 @@ func consumer(concurrency chan struct{}, wg *sync.WaitGroup, totalRows, rowID in
 			panic(err)
 		}
 		//log.Println("processing line:", rowID, totalRows)
-		utils.ColorArrowProgressBar(rowID, totalRows)
+		progressBar.ColorArrowProgressBar(rowID, totalRows)
 
 		row := []string{
 			strconv.Itoa(rowID),
@@ -160,15 +161,6 @@ func consumer(concurrency chan struct{}, wg *sync.WaitGroup, totalRows, rowID in
 			},
 		)
 		row = append(row, sentence...)
-
-		//vocabulary, err := gtranslate.VocabularyWithParams(
-		//	originalText,
-		//	gtranslate.TranslationParams{
-		//		From: "en",
-		//		To:   "fa",
-		//	},
-		//)
-		//row = append(row, vocabulary...)
 
 		// Add the pair to the slice.
 		paragraphs = append(paragraphs, row)
