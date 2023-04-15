@@ -112,7 +112,7 @@ func main() {
 	// Flush any remaining data to the CSV file.
 	writer.Flush()
 
-	progressBar.ColorArrowProgressBar(100, 100)
+	progressbar.ColorArrowProgressBar(100, 100)
 	intermediateFile.Close()
 	normalizedCommasFileName := fmt.Sprintf("%s/%s-normalized.csv", outputFolder, inputFileNameWithoutExt)
 	sortedFileName := fmt.Sprintf("%s/%s-sorted.csv", outputFolder, inputFileNameWithoutExt)
@@ -144,7 +144,7 @@ func consumer(concurrency chan struct{}, wg *sync.WaitGroup, totalRows, rowID in
 			panic(err)
 		}
 		//log.Println("processing line:", rowID, totalRows)
-		progressBar.ColorArrowProgressBar(rowID, totalRows)
+		progressbar.ColorArrowProgressBar(rowID, totalRows)
 
 		row := []string{
 			strconv.Itoa(rowID),
