@@ -11,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
+	"github.com/mshafiee/progressbar"
 	"github.com/mshafiee/translate/internal/gtranslate"
 	"github.com/mshafiee/translate/internal/po"
 	"github.com/mshafiee/translate/internal/utils"
@@ -20,7 +21,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+const extendedTranslation = true
 
 type multilineWriter struct {
 	*widget.Entry
@@ -75,7 +79,7 @@ func main() {
 	toCombo := widget.NewSelect(languageNames, func(s string) {})
 	toCombo.SetSelected("Persian")
 
-	progressBar := widget.NewProgressBarInfinite()
+	progressBar := widget.NewProgressBar()
 	progressBar.Hide()
 
 	outputMultiLineEntry := widget.NewMultiLineEntry()
@@ -95,16 +99,18 @@ func main() {
 		output := outputEntry.Text
 
 		go func() {
-			translate(outputMultiLineEntryWriter, from, input, output, to)
-			progressBar.Stop()
+			translate(outputMultiLineEntryWriter, progressBar, from, input, output, to, extendedTranslation)
+			progressBar.Hide()
 		}()
 		progressBar.Show()
-		progressBar.Start()
 	})
 	translateButton.Disable()
 
 	inputEntry.OnChanged = validate(outputMultiLineEntryWriter, fromCombo, inputEntry, outputEntry, toCombo, translateButton)
 	outputEntry.OnChanged = validate(outputMultiLineEntryWriter, fromCombo, inputEntry, outputEntry, toCombo, translateButton)
+
+	creditLabel := widget.NewLabel("Translate, Developed by Mohammad Shafiee, muhammad.shafiee@gmail.com")
+	creditLabel.Alignment = fyne.TextAlignCenter
 
 	formContainer := container.New(
 		layout.NewFormLayout(),
@@ -142,7 +148,7 @@ func validate(w io.Writer, fromCombo *widget.Select, inputEntry *widget.Entry, o
 		// Check if any field is empty
 		if from == "" || input == "" || output == "" || to == "" {
 			translateButton.Disable()
-			fmt.Fprintln(w, "Please fill all fields")
+			fmt.Fprintln(os.Stdout, "Please fill all fields")
 			widget.NewLabel("Please fill all fields").Show()
 			return
 		}
@@ -152,7 +158,10 @@ func validate(w io.Writer, fromCombo *widget.Select, inputEntry *widget.Entry, o
 
 const MAX_CONCURRENCY = 10
 
-func translate(w io.Writer, translateFrom string, inputFilePath string, outputFolder string, translateTo string) {
+func translate(w io.Writer, progressBarUI *widget.ProgressBar, translateFrom string, inputFilePath string, outputFolder string, translateTo string, extendedTranslation bool) {
+	fmt.Fprintf(w, "Source: %s\n", inputFilePath)
+	fmt.Fprintf(w, "Translation files path: %s\n", outputFolder)
+	fmt.Fprintf(w, "Start Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	// Validate input parameters
 	if inputFilePath == "" {
 		exitWithError(w, errors.New("missing required input file path"))
@@ -222,7 +231,7 @@ func translate(w io.Writer, translateFrom string, inputFilePath string, outputFo
 		// Increment the WaitGroup lineNumber.
 		wg.Add(1)
 
-		go consumer(w, concurrency, &wg, totalLineNumber, lineNumber, scanner.Text(), translateFrom, translateTo, writer)
+		go consumer(w, concurrency, &wg, progressBarUI, totalLineNumber, lineNumber, scanner.Text(), translateFrom, translateTo, extendedTranslation, writer)
 
 	}
 
@@ -232,7 +241,7 @@ func translate(w io.Writer, translateFrom string, inputFilePath string, outputFo
 	// Flush any remaining data to the CSV file.
 	writer.Flush()
 
-	//progressbar.ColorArrowProgressBar(100, 100)
+	progressbar.ColorArrowProgressBar(100, 100)
 	intermediateFile.Close()
 	normalizedCommasFileName := fmt.Sprintf("%s/%s-normalized.csv", outputFolder, inputFileNameWithoutExt)
 	sortedFileName := fmt.Sprintf("%s/%s-sorted.csv", outputFolder, inputFileNameWithoutExt)
@@ -244,7 +253,7 @@ func translate(w io.Writer, translateFrom string, inputFilePath string, outputFo
 var mutex = &sync.Mutex{}
 
 // Consumer function that consumes elements of the buffer and writes them to a CSV file.
-func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, totalRows, rowID int, originalText, translateFrom, translateTo string, writer *csv.Writer) {
+func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, progressBarUI *widget.ProgressBar, totalRows, rowID int, originalText, translateFrom, translateTo string, extendedTranslation bool, writer *csv.Writer) {
 	// Release the slot in the concurrency channel when done.
 	defer func() { <-concurrency }()
 	defer wg.Done()
@@ -256,15 +265,16 @@ func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, totalR
 		googleTranslated, err := gtranslate.TranslateWithParams(
 			originalText,
 			gtranslate.TranslationParams{
-				From: "en",
-				To:   "fa",
+				From: translateFrom,
+				To:   translateTo,
 			},
 		)
 		if err != nil {
-			panic(err)
+			fmt.Fprintln(w, err)
+			//panic(err)
 		}
-		fmt.Fprintf(w, "processing line: %d from %d\n", rowID, totalRows)
-		//progressbar.ColorArrowProgressBar(rowID, totalRows)
+		progressBarUI.SetValue(float64(rowID) / float64(totalRows))
+		progressbar.ColorArrowProgressBar(rowID, totalRows)
 
 		row := []string{
 			strconv.Itoa(rowID),
@@ -273,15 +283,20 @@ func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, totalR
 		//row = append(row, googleTranslated...)
 		row = append(row, googleTranslated[0])
 
-		sentence, err := gtranslate.SentenceWithParams(
-			originalText,
-			gtranslate.TranslationParams{
-				From: translateFrom,
-				To:   translateTo,
-			},
-		)
-		row = append(row, sentence...)
+		if extendedTranslation {
+			sentence, err := gtranslate.SentenceWithParams(
+				originalText,
+				gtranslate.TranslationParams{
+					From: translateFrom,
+					To:   translateTo,
+				},
+			)
+			if err != nil {
 
+				fmt.Fprintln(w, err)
+			}
+			row = append(row, sentence...)
+		}
 		// Add the pair to the slice.
 		paragraphs = append(paragraphs, row)
 	}
