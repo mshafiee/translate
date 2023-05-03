@@ -1,5 +1,7 @@
 package main
 
+//go:generate fyne package
+
 import (
 	"bufio"
 	"encoding/csv"
@@ -12,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/mshafiee/progressbar"
+	"github.com/mshafiee/translate/cmd/translate-ui/data"
 	"github.com/mshafiee/translate/internal/gtranslate"
 	"github.com/mshafiee/translate/internal/po"
 	"github.com/mshafiee/translate/internal/utils"
@@ -40,6 +43,7 @@ func main() {
 	// create a channel to control the translation
 	ctrl := make(chan bool)
 	a := app.NewWithID("com.github.mshafiee.translate")
+	a.SetIcon(data.ResourceLogo)
 	w := a.NewWindow("Translate")
 	w.Resize(fyne.NewSize(800, 300))
 
@@ -77,7 +81,7 @@ func main() {
 	toCombo := widget.NewSelect(languageNames, func(s string) {})
 	toCombo.SetSelected("Persian")
 
-	retranslationCheck := widget.NewCheck("", nil)
+	retranslationCheck := widget.NewCheck("Retranslate separate sentences", nil)
 
 	progressBar := widget.NewProgressBar()
 	progressBar.Hide()
@@ -152,7 +156,7 @@ func main() {
 		container.New(layout.NewBorderLayout(nil, nil, nil, outputButton), outputEntry, outputButton),
 		widget.NewLabel("To:"),
 		toCombo,
-		widget.NewLabel("Retranslation:"),
+		layout.NewSpacer(),
 		retranslationCheck,
 		layout.NewSpacer(),
 		container.New(

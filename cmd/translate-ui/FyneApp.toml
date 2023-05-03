@@ -1,7 +1,6 @@
 [Details]
-  Icon = "icon.png"
+  Icon = "./data/assets/logo.png"
   Name = "Translate"
   ID = "com.github.mshafiee.translate"
   Version = "1.0.0"
-  Build = 1
-
+  Build = 1003
