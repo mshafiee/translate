@@ -16,15 +16,15 @@ import (
 	"github.com/mshafiee/translate/internal/po"
 	"github.com/mshafiee/translate/internal/utils"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
-
-const extendedTranslation = true
 
 type multilineWriter struct {
 	*widget.Entry
@@ -37,15 +37,13 @@ func (w *multilineWriter) Write(p []byte) (n int, err error) {
 }
 
 func main() {
-	var languageNames []string
-
-	for _, lang := range languages {
-		languageNames = append(languageNames, lang[0])
-	}
-
-	a := app.New()
+	// create a channel to control the translation
+	ctrl := make(chan bool)
+	a := app.NewWithID("com.github.mshafiee.translate")
 	w := a.NewWindow("Translate")
 	w.Resize(fyne.NewSize(800, 300))
+
+	languageNames := getLanguageNames()
 
 	fromCombo := widget.NewSelect(languageNames, func(s string) {})
 	fromCombo.SetSelected("English")
@@ -79,38 +77,70 @@ func main() {
 	toCombo := widget.NewSelect(languageNames, func(s string) {})
 	toCombo.SetSelected("Persian")
 
+	retranslationCheck := widget.NewCheck("", nil)
+
 	progressBar := widget.NewProgressBar()
 	progressBar.Hide()
 
 	outputMultiLineEntry := widget.NewMultiLineEntry()
+	outputMultiLineEntry.Text = fmt.Sprintf("%s\n%s\n", "Project: https://github.com/mshafiee/translate", "Developed by muhammad.shafiee@gmail.com, 2023")
+
 	outputMultiLineEntryWriter := &multilineWriter{outputMultiLineEntry}
 
-	translateButton := widget.NewButton("Translate", func() {
-		var from, to string
-		for _, l := range languages {
-			if l[0] == fromCombo.Selected {
-				from = l[1]
-			}
-			if l[0] == toCombo.Selected {
-				to = l[1]
-			}
-		}
-		input := inputEntry.Text
-		output := outputEntry.Text
+	var controlButton *widget.Button
+	var translateButton *widget.Button
 
-		go func() {
-			translate(outputMultiLineEntryWriter, progressBar, from, input, output, to, extendedTranslation)
-			progressBar.Hide()
-		}()
-		progressBar.Show()
+	translateButton = widget.NewButton("Translate", func() {
+		switch translateButton.Text {
+		case "Resume":
+			controlButton.Text = "Pause"
+			controlButton.Refresh()
+			translateButton.Text = "Translate"
+			translateButton.Disable()
+			// resume the goroutine
+			ctrl <- true
+			break
+		case "Translate":
+			from, to := getLanguageFromTo(fromCombo, toCombo)
+			input := inputEntry.Text
+			output := outputEntry.Text
+			go func() {
+				translate(ctrl, outputMultiLineEntryWriter, progressBar, from, input, output, to, retranslationCheck.Checked)
+				translateButton.Enable()
+				controlButton.Disable()
+				progressBar.Hide()
+			}()
+			translateButton.Disable()
+			controlButton.Enable()
+			progressBar.Show()
+			break
+		}
 	})
-	translateButton.Disable()
+
+	controlButton = widget.NewButton("Pause", func() {
+		switch controlButton.Text {
+		case "Pause":
+			controlButton.Text = "Cancel"
+			controlButton.Refresh()
+			translateButton.Text = "Resume"
+			translateButton.Enable()
+			// pause the goroutine
+			ctrl <- true
+			break
+		case "Cancel":
+			controlButton.Text = "Pause"
+			controlButton.Disable()
+			translateButton.Text = "Translate"
+			translateButton.Refresh()
+			// cancel the goroutine
+			ctrl <- false
+			break
+		}
+	})
+	controlButton.Disable()
 
 	inputEntry.OnChanged = validate(outputMultiLineEntryWriter, fromCombo, inputEntry, outputEntry, toCombo, translateButton)
 	outputEntry.OnChanged = validate(outputMultiLineEntryWriter, fromCombo, inputEntry, outputEntry, toCombo, translateButton)
-
-	creditLabel := widget.NewLabel("Translate, Developed by Mohammad Shafiee, muhammad.shafiee@gmail.com")
-	creditLabel.Alignment = fyne.TextAlignCenter
 
 	formContainer := container.New(
 		layout.NewFormLayout(),
@@ -122,8 +152,14 @@ func main() {
 		container.New(layout.NewBorderLayout(nil, nil, nil, outputButton), outputEntry, outputButton),
 		widget.NewLabel("To:"),
 		toCombo,
+		widget.NewLabel("Retranslation:"),
+		retranslationCheck,
 		layout.NewSpacer(),
-		translateButton,
+		container.New(
+			layout.NewGridLayout(2),
+			translateButton,
+			controlButton,
+		),
 		layout.NewSpacer(),
 		progressBar,
 	)
@@ -138,6 +174,28 @@ func main() {
 	w.ShowAndRun()
 }
 
+func getLanguageFromTo(fromCombo *widget.Select, toCombo *widget.Select) (string, string) {
+	var from, to string
+	for _, l := range languages {
+		if l[0] == fromCombo.Selected {
+			from = l[1]
+		}
+		if l[0] == toCombo.Selected {
+			to = l[1]
+		}
+	}
+	return from, to
+}
+
+func getLanguageNames() []string {
+	var languageNames []string
+
+	for _, lang := range languages {
+		languageNames = append(languageNames, lang[0])
+	}
+	return languageNames
+}
+
 func validate(w io.Writer, fromCombo *widget.Select, inputEntry *widget.Entry, outputEntry *widget.Entry, toCombo *widget.Select, translateButton *widget.Button) func(_ string) {
 	return func(_ string) {
 		from := fromCombo.Selected
@@ -148,33 +206,36 @@ func validate(w io.Writer, fromCombo *widget.Select, inputEntry *widget.Entry, o
 		// Check if any field is empty
 		if from == "" || input == "" || output == "" || to == "" {
 			translateButton.Disable()
-			fmt.Fprintln(os.Stdout, "Please fill all fields")
-			widget.NewLabel("Please fill all fields").Show()
 			return
 		}
 		translateButton.Enable()
 	}
 }
 
-const MAX_CONCURRENCY = 10
-
-func translate(w io.Writer, progressBarUI *widget.ProgressBar, translateFrom string, inputFilePath string, outputFolder string, translateTo string, extendedTranslation bool) {
-	fmt.Fprintf(w, "Source: %s\n", inputFilePath)
-	fmt.Fprintf(w, "Translation files path: %s\n", outputFolder)
-	fmt.Fprintf(w, "Start Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+func translate(ctrl <-chan bool, w io.Writer, progressBarUI *widget.ProgressBar, translateFrom string, inputFilePath string, outputFolder string, translateTo string, doRetranslation bool) {
 	// Validate input parameters
 	if inputFilePath == "" {
 		exitWithError(w, errors.New("missing required input file path"))
+		return
 	}
 	if translateFrom == "" {
 		exitWithError(w, errors.New("missing required 'from' language code"))
+		return
 	}
 	if translateTo == "" {
 		exitWithError(w, errors.New("missing required 'to' language code"))
+		return
 	}
 	if outputFolder == "" {
 		exitWithError(w, errors.New("missing required output folder path"))
+		return
 	}
+
+	fmt.Fprintf(w, "---\nSource: %s\n", inputFilePath)
+	fmt.Fprintf(w, "Translation files path: %s\n", outputFolder)
+	fmt.Fprintf(w, "Retranslation: %v\n", doRetranslation)
+	fmt.Fprintf(w, "Start Time: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+
 	inputFileNameWithoutExt := filepath.Base(inputFilePath[:len(inputFilePath)-len(filepath.Ext(inputFilePath))])
 
 	outputFolder = fmt.Sprintf("%s/%s", outputFolder, inputFileNameWithoutExt)
@@ -217,21 +278,47 @@ func translate(w io.Writer, progressBarUI *widget.ProgressBar, translateFrom str
 	var wg sync.WaitGroup
 
 	// Create a channel to limit the number of concurrent goroutines.
-	concurrency := make(chan struct{}, MAX_CONCURRENCY)
+	maxConcurrency := runtime.NumCPU() * 4
+	concurrency := make(chan struct{}, maxConcurrency)
 
 	lineNumber := 0
 
 	// Process each line in a separate goroutine.
 	for scanner.Scan() {
-		lineNumber++
+		for {
+			select {
+			case paused := <-ctrl:
+				// pause or cancel the goroutine
+				if paused {
+					fmt.Fprintf(w, "%s - pausing...\n", time.Now().Format("2006-01-02 15:04"))
+					ctrlSignal := <-ctrl // wait for resume signal
+					if ctrlSignal {
+						fmt.Fprintf(w, "%s - resumed.\n", time.Now().Format("2006-01-02 15:04"))
+					} else {
+						fmt.Fprintf(w, "%s - canceled.\n", time.Now().Format("2006-01-02 15:04"))
 
-		// Acquire a slot in the concurrency channel.
-		concurrency <- struct{}{}
+						// Wait for all goroutines to finish.
+						wg.Wait()
 
-		// Increment the WaitGroup lineNumber.
-		wg.Add(1)
+						// Flush any remaining data to the CSV file.
+						writer.Flush()
 
-		go consumer(w, concurrency, &wg, progressBarUI, totalLineNumber, lineNumber, scanner.Text(), translateFrom, translateTo, extendedTranslation, writer)
+						// exit the translate function
+						return
+					}
+				}
+			default:
+				lineNumber++
+
+				// Acquire a slot in the concurrency channel.
+				concurrency <- struct{}{}
+
+				// Increment the WaitGroup lineNumber.
+				wg.Add(1)
+
+				go consumer(w, concurrency, &wg, progressBarUI, totalLineNumber, lineNumber, scanner.Text(), translateFrom, translateTo, doRetranslation, writer)
+			}
+		}
 
 	}
 
@@ -242,7 +329,6 @@ func translate(w io.Writer, progressBarUI *widget.ProgressBar, translateFrom str
 	writer.Flush()
 
 	progressbar.ColorArrowProgressBar(100, 100)
-	intermediateFile.Close()
 	normalizedCommasFileName := fmt.Sprintf("%s/%s-normalized.csv", outputFolder, inputFileNameWithoutExt)
 	sortedFileName := fmt.Sprintf("%s/%s-sorted.csv", outputFolder, inputFileNameWithoutExt)
 	translatedTextFileName := fmt.Sprintf("%s/%s-%s.txt", outputFolder, inputFileNameWithoutExt, translateTo)
@@ -253,7 +339,7 @@ func translate(w io.Writer, progressBarUI *widget.ProgressBar, translateFrom str
 var mutex = &sync.Mutex{}
 
 // Consumer function that consumes elements of the buffer and writes them to a CSV file.
-func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, progressBarUI *widget.ProgressBar, totalRows, rowID int, originalText, translateFrom, translateTo string, extendedTranslation bool, writer *csv.Writer) {
+func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, progressBarUI *widget.ProgressBar, totalRows, rowID int, originalText, translateFrom, translateTo string, doRetranslation bool, writer *csv.Writer) {
 	// Release the slot in the concurrency channel when done.
 	defer func() { <-concurrency }()
 	defer wg.Done()
@@ -271,7 +357,6 @@ func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, progre
 		)
 		if err != nil {
 			fmt.Fprintln(w, err)
-			//panic(err)
 		}
 		progressBarUI.SetValue(float64(rowID) / float64(totalRows))
 		progressbar.ColorArrowProgressBar(rowID, totalRows)
@@ -283,7 +368,7 @@ func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, progre
 		//row = append(row, googleTranslated...)
 		row = append(row, googleTranslated[0])
 
-		if extendedTranslation {
+		if doRetranslation {
 			sentence, err := gtranslate.SentenceWithParams(
 				originalText,
 				gtranslate.TranslationParams{
@@ -313,7 +398,7 @@ func consumer(w io.Writer, concurrency chan struct{}, wg *sync.WaitGroup, progre
 				record = append(record, s)
 			}
 			if err := writer.Write(record); err != nil {
-				fmt.Println("Error:", err)
+				log.Println("Error:", err)
 				return
 			}
 		}
