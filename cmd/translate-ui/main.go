@@ -289,41 +289,38 @@ func translate(ctrl <-chan bool, w io.Writer, progressBarUI *widget.ProgressBar,
 
 	// Process each line in a separate goroutine.
 	for scanner.Scan() {
-		for {
-			select {
-			case paused := <-ctrl:
-				// pause or cancel the goroutine
-				if paused {
-					fmt.Fprintf(w, "%s - pausing...\n", time.Now().Format("2006-01-02 15:04"))
-					ctrlSignal := <-ctrl // wait for resume signal
-					if ctrlSignal {
-						fmt.Fprintf(w, "%s - resumed.\n", time.Now().Format("2006-01-02 15:04"))
-					} else {
-						fmt.Fprintf(w, "%s - canceled.\n", time.Now().Format("2006-01-02 15:04"))
+		select {
+		case paused := <-ctrl:
+			// pause or cancel the goroutine
+			if paused {
+				fmt.Fprintf(w, "%s - pausing...\n", time.Now().Format("2006-01-02 15:04"))
+				ctrlSignal := <-ctrl // wait for resume signal
+				if ctrlSignal {
+					fmt.Fprintf(w, "%s - resumed.\n", time.Now().Format("2006-01-02 15:04"))
+				} else {
+					fmt.Fprintf(w, "%s - canceled.\n", time.Now().Format("2006-01-02 15:04"))
 
-						// Wait for all goroutines to finish.
-						wg.Wait()
+					// Wait for all goroutines to finish.
+					wg.Wait()
 
-						// Flush any remaining data to the CSV file.
-						writer.Flush()
+					// Flush any remaining data to the CSV file.
+					writer.Flush()
 
-						// exit the translate function
-						return
-					}
+					// exit the translate function
+					return
 				}
-			default:
-				lineNumber++
-
-				// Acquire a slot in the concurrency channel.
-				concurrency <- struct{}{}
-
-				// Increment the WaitGroup lineNumber.
-				wg.Add(1)
-
-				go consumer(w, concurrency, &wg, progressBarUI, totalLineNumber, lineNumber, scanner.Text(), translateFrom, translateTo, doRetranslation, writer)
 			}
-		}
+		default:
+			lineNumber++
 
+			// Acquire a slot in the concurrency channel.
+			concurrency <- struct{}{}
+
+			// Increment the WaitGroup lineNumber.
+			wg.Add(1)
+
+			go consumer(w, concurrency, &wg, progressBarUI, totalLineNumber, lineNumber, scanner.Text(), translateFrom, translateTo, doRetranslation, writer)
+		}
 	}
 
 	// Wait for all goroutines to finish.
