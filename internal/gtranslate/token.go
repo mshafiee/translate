@@ -2,152 +2,148 @@ package gtranslate
 
 import (
 	"fmt"
-	"github.com/robertkrimen/otto"
-	"io/ioutil"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-var vm = otto.New()
-
-// var resultCache otto.Value
-var mu sync.Mutex
-
-func sM(a otto.Value, TTK ...otto.Value) (otto.Value, error) {
-	mu.Lock()
-	defer mu.Unlock()
-	//if !resultCache.IsNull() {
-	//	return resultCache, nil
-	//}
-	err := vm.Set("x", a)
-	if err != nil {
-		return otto.UndefinedValue(), err
-	}
-
-	if len(TTK) > 0 {
-		_ = vm.Set("internalTTK", TTK[0])
-	} else {
-		_ = vm.Set("internalTTK", "0")
-	}
-
-	result, err := vm.Run(`
-		function sM(a) {
-			var b;
-			if (null !== yr)
-				b = yr;
-			else {
-				b = wr(String.fromCharCode(84));
-				var c = wr(String.fromCharCode(75));
-				b = [b(), b()];
-				b[1] = c();
-				b = (yr = window[b.join(c())] || "") || ""
-			}
-			var d = wr(String.fromCharCode(116))
-				, c = wr(String.fromCharCode(107))
-				, d = [d(), d()];
-			d[1] = c();
-			c = "&" + d.join("") + "=";
-			d = b.split(".");
-			b = Number(d[0]) || 0;
-			for (var e = [], f = 0, g = 0; g < a.length; g++) {
-				var l = a.charCodeAt(g);
-				128 > l ? e[f++] = l : (2048 > l ? e[f++] = l >> 6 | 192 : (55296 == (l & 64512) && g + 1 < a.length && 56320 == (a.charCodeAt(g + 1) & 64512) ? (l = 65536 + ((l & 1023) << 10) + (a.charCodeAt(++g) & 1023),
-					e[f++] = l >> 18 | 240,
-					e[f++] = l >> 12 & 63 | 128) : e[f++] = l >> 12 | 224,
-					e[f++] = l >> 6 & 63 | 128),
-					e[f++] = l & 63 | 128)
-			}
-			a = b;
-			for (f = 0; f < e.length; f++)
-				a += e[f],
-					a = xr(a, "+-a^+6");
-			a = xr(a, "+-3^+b+-f");
-			a ^= Number(d[1]) || 0;
-			0 > a && (a = (a & 2147483647) + 2147483648);
-			a %= 1E6;
-			return c + (a.toString() + "." + (a ^ b))
-		}
-
-		var yr = null;
-		var wr = function(a) {
-			return function() {
-				return a
-			}
-		}
-			, xr = function(a, b) {
-			for (var c = 0; c < b.length - 2; c += 3) {
-				var d = b.charAt(c + 2)
-					, d = "a" <= d ? d.charCodeAt(0) - 87 : Number(d)
-					, d = "+" == b.charAt(c + 1) ? a >>> d : a << d;
-				a = "+" == b.charAt(c) ? a + d & 4294967295 : a ^ d
-			}
-			return a
-		};
-		
-		var window = {
-			TKK: internalTTK
-		};
-
-		sM(x)
-	`)
-	if err != nil {
-		return otto.UndefinedValue(), err
-	}
-
-	return result, nil
+// TranslationToken encapsulates operations related to caching the translation token.
+type TranslationToken struct {
+	token string
 }
 
-func updateTTK(TTK otto.Value) (otto.Value, error) {
-	t := time.Now().UnixNano() / 3600000
-	now := math.Floor(float64(t))
-	ttk, err := strconv.ParseFloat(TTK.String(), 64)
+// encodedTransform function applies a series of transformations to the input number
+// based on the provided transformation string, and returns the result.
+func (t *TranslationToken) encodedTransform(inputNum uint, transformStr string) uint {
+	// Loop over the transformation string in steps of 3
+	for i := 0; i < len(transformStr)-2; i += 3 {
+		// Get the current character
+		curChar := transformStr[i+2]
+
+		// Determine the offset: if the character is a letter, subtract 87,
+		// otherwise convert it to a number
+		var offset int
+		if 'a' <= curChar {
+			offset = int(curChar - 87)
+		} else {
+			offset, _ = strconv.Atoi(string(curChar))
+		}
+
+		// Apply the transformation: if the next character is '+', shift right,
+		// otherwise shift left
+		var transformed uint
+		if transformStr[i+1] == '+' {
+			transformed = inputNum >> offset
+		} else {
+			transformed = inputNum << offset
+		}
+
+		// Apply the operation specified by the current character:
+		// if it's '+', add the transformed value, otherwise XOR it
+		if transformStr[i] == '+' {
+			inputNum = inputNum + transformed
+		} else {
+			inputNum = inputNum ^ transformed
+		}
+	}
+
+	return inputNum
+}
+
+// encodeString function transforms the input string based on the current config and
+// returns the encoded string result.
+func (t *TranslationToken) encodeString(inputStr string) string {
+	var configValue string
+	if t.token != "" {
+		configValue = t.token
+	} else {
+		configValue = t.token
+		if configValue == "" {
+			configValue = "0"
+		}
+		t.token = configValue
+	}
+	tkkKey := "ttk"
+	paramKey := "&" + tkkKey + "="
+	configParts := strings.Split(configValue, ".")
+	configValueNum, _ := strconv.Atoi(configParts[0])
+	utf8Vals := []rune{}
+	for idx := 0; idx < len(inputStr); idx++ {
+		charCode := int(inputStr[idx])
+		if charCode < 128 {
+			utf8Vals = append(utf8Vals, rune(charCode))
+		} else {
+			if charCode < 2048 {
+				utf8Vals = append(utf8Vals, rune(charCode>>6|192))
+			} else {
+				if (charCode&64512) == 55296 && idx+1 < len(inputStr) && (int(inputStr[idx+1])&64512) == 56320 {
+					charCode = 65536 + ((charCode & 1023) << 10) + (int(inputStr[idx+1]) & 1023)
+					utf8Vals = append(utf8Vals, rune(charCode>>18|240))
+					utf8Vals = append(utf8Vals, rune(charCode>>12&63|128))
+					idx++
+				} else {
+					utf8Vals = append(utf8Vals, rune(charCode>>12|224))
+				}
+				utf8Vals = append(utf8Vals, rune(charCode>>6&63|128))
+			}
+			utf8Vals = append(utf8Vals, rune(charCode&63|128))
+		}
+	}
+	sum := configValueNum
+	for i := 0; i < len(utf8Vals); i++ {
+		sum += int(utf8Vals[i])
+		sum = int(t.encodedTransform(uint(sum), "+-a^+6"))
+	}
+	sum = int(t.encodedTransform(uint(sum), "+-3^+b+-f"))
+	sum ^= configValueNum
+	if sum < 0 {
+		sum = (sum & 2147483647) + 2147483648
+	}
+	sum %= 1e6
+	sumStr := strconv.Itoa(sum)
+	return paramKey + (sumStr + "." + strconv.Itoa(sum^configValueNum))
+}
+
+func (t *TranslationToken) update() error {
+	tm := time.Now().UnixNano() / 3600000
+	now := math.Floor(float64(tm))
+	ttk, err := strconv.ParseFloat(t.token, 64)
 	if err != nil {
-		return otto.UndefinedValue(), err
+		return err
 	}
 
 	if ttk == now {
-		return TTK, nil
+		return nil
 	}
 
 	resp, err := http.Get(fmt.Sprintf("https://translate.%s", GoogleHost))
 	if err != nil {
-		return otto.UndefinedValue(), err
+		return err
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return otto.UndefinedValue(), err
+		return err
 	}
 
 	matches := regexp.MustCompile(`tkk:\s?'(.+?)'`).FindStringSubmatch(string(body))
 	if len(matches) > 0 {
-		v, err := otto.ToValue(matches[0])
-		if err != nil {
-			return otto.UndefinedValue(), err
-		}
-		return v, nil
+		t.token = matches[0]
 	}
-
-	return TTK, nil
+	return nil
 }
 
-func get(text otto.Value, ttk otto.Value) string {
-	ttk, err := updateTTK(ttk)
-	if err != nil {
-		return ""
-	}
+func (t *TranslationToken) Get(text string) (string, error) {
+	t.update()
+	tk := t.encodeString(text)
+	tk = strings.Replace(tk, "&ttk=", "", -1)
+	return tk, nil
+}
 
-	tk, err := sM(text, ttk)
-
-	if err != nil {
-		return ""
-	}
-	sTk := strings.Replace(tk.String(), "&tk=", "", -1)
-	return sTk
-
+func NewTranslationToken() TranslationToken {
+	return TranslationToken{token: "0"}
 }

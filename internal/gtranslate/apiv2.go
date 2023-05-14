@@ -3,7 +3,6 @@ package gtranslate
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/robertkrimen/otto"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -13,10 +12,10 @@ import (
 	"golang.org/x/text/language"
 )
 
-var ttk otto.Value
+var ttk TranslationToken
 
 func init() {
-	ttk, _ = otto.ToValue("0")
+	ttk = NewTranslationToken()
 }
 
 const (
@@ -39,26 +38,25 @@ func translate(text, from, to string, withVerification bool, tries int, delay ti
 		}
 	}
 
-	t, _ := otto.ToValue(text)
-
 	urll := fmt.Sprintf("https://translate.%s/translate_a/single", GoogleHost)
 
-	token := get(t, ttk)
+	//token, err := ttk.Get(text)
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	data := map[string]string{
 		"client": "gtx",
 		"sl":     from,
 		"tl":     to,
 		"hl":     to,
-		"dt":     "t",
-		//"dt":     []string{"at", "bd", "ex", "ld", "md", "qca", "rw", "rm", "ss", "t"},
-		"ie":   "UTF-8",
-		"oe":   "UTF-8",
-		"otf":  "1",
-		"ssel": "0",
-		"tsel": "0",
-		"kc":   "7",
-		"q":    text,
+		"ie":     "UTF-8",
+		"oe":     "UTF-8",
+		"otf":    "1",
+		"ssel":   "0",
+		"tsel":   "0",
+		"kc":     "7",
+		"q":      text,
 	}
 
 	u, err := url.Parse(urll)
@@ -75,13 +73,14 @@ func translate(text, from, to string, withVerification bool, tries int, delay ti
 		parameters.Add("dt", v)
 	}
 
-	parameters.Add("tk", token)
+	//parameters.Add("tk", token)
 	u.RawQuery = parameters.Encode()
 
 	var r *http.Response
 
 	for tries > 0 {
 		r, err = http.Get(u.String())
+		log.Println(u.String())
 		if err != nil {
 			if err == http.ErrHandlerTimeout {
 				return nil, errBadNetwork

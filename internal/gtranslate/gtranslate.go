@@ -76,7 +76,7 @@ func VocabularyWithParams(text string, params TranslationParams) ([]string, erro
 	return vocabularyMeaning, nil
 }
 
-// SentenceWithParams translate vocabulary of text
+// SentenceWithParams translate sentences of text
 func SentenceWithParams(text string, params TranslationParams) ([]string, error) {
 	var sentenceMeaning []string
 
