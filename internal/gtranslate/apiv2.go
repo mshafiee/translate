@@ -3,7 +3,7 @@ package gtranslate
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -98,7 +98,7 @@ func translate(text, from, to string, withVerification bool, tries int, delay ti
 		}
 	}
 
-	raw, err := ioutil.ReadAll(r.Body)
+	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, err
 	}
